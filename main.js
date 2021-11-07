@@ -1,34 +1,21 @@
 // First let's load three.js
 import * as THREE from './resources/threejs/r132/build/three.module.js';
 
-function main() {
-    // We will ask three.js to draw into that canvas so we need to look it up.
+function main(hue, saturation, luminance, numNodes, lineMagnitude, multiplier) {
     const canvas = document.querySelector('#c');
-    // After we look up the canvas we create a WebGLRenderer. The renderer is
-    // the thing responsible for actually taking all the data you provide and
-    // rendering it to the canvas.
     const renderer = new THREE.WebGLRenderer({canvas});
 
     /* == CAMERA ===============================================================
      * Next up we need a camera. We'll create a PerspectiveCamera.
      */
-    // fov is short for field of view. In this case 75 degrees in the vertical
-    // dimension. Note that most angles in three.js are in radians but for some
-    // reason the perspective camera takes degrees.
-    const fov = 75;
-    // aspect is the display aspect of the canvas: by default a canvas is
-    // 300x150 pixels which makes the aspect 300/150 or 2.
+    const fov = 40;
     const aspect = 2;  // the canvas default
-    // near and far represent the space in front of the camera that will be
-    // rendered. Anything before that range or after that range will be clipped
-    // (not drawn).
     const near = 0.1;
-    const far = 5;
+    const far = 1000;
     const camera = new THREE.PerspectiveCamera(fov, aspect, near, far);
-    // The camera defaults to looking down the -Z axis with +Y up. We'll put our
-    // cube at the origin so we need to move the camera back a little from the
-    // origin in order to see anything.
-    camera.position.z = 2;
+    camera.position.set(0, 0, 50);
+    camera.up.set(0, 1, 0);
+    camera.lookAt(0, 0, 0);
 
     /* == SCENE ================================================================
      * Next we make a Scene. A Scene in three.js is the root of a form of scene
@@ -37,59 +24,102 @@ function main() {
     const scene = new THREE.Scene();
 
     /* == LIGHT ================================================================
-     * Let's create a directional light.
      */
     {
-        // Directional lights have a position and a target. Both default to
-        // 0, 0, 0. In our case we're setting the light's position to
-        // -1, 2, 4 so it's slightly on the left, above, and behind our camera.
-        // The target is still 0, 0, 0 so it will shine toward the origin.
         const color = 0xFFFFFF;
-        const intensity = 1;
-        const light = new THREE.DirectionalLight(color, intensity);
-        light.position.set(-1, 2, 4);
+        const intensity = 3;
+        const light = new THREE.PointLight(color, intensity);
         scene.add(light);
     }
 
-    /* == BOX ==================================================================
-     * Next up we create a BoxGeometry which contains the data for a box. Almost
-     * anything we want to display in Three.js needs geometry which defines the
-     * vertices that make up our 3D object.
+    /* == PERIMETER NODES ======================================================
      */
-    const boxWidth = 1;
-    const boxHeight = 1;
-    const boxDepth = 1;
-    const geometry = new THREE.BoxGeometry(boxWidth, boxHeight, boxDepth);
+    let zOffset = 0;
+    function createPerimeterNodes() {
+        const nodes = [];
 
-    // We'll make a function that creates a new material with the specified
-    // color. Then it creates a mesh using the specified geometry and adds it to
-    // the scene and sets its X position.
-    function makeInstance(geometry, color, x) {
-        // We create a basic material and set its color. Colors can be
-        // specified using standard CSS style 6 digit hex color values.
-        const material = new THREE.MeshPhongMaterial({color});
-        // We then create a Mesh. A Mesh in three represents the combination of
-        // three things
-        //
-        // 1. A Geometry (the shape of the object)
-        // 2. A Material (how to draw the object, shiny or flat, what color,
-        // what texture(s) to apply. Etc.)
-        // 3. The position, orientation, and scale of that object in the scene
-        // relative to its parent. In the code below that parent is the scene.
-        const cube = new THREE.Mesh(geometry, material);
-        // And finally we add that mesh to the scene
-        scene.add(cube);
-        cube.position.x = x;
-        return cube;
+        nodes.push([0, lineMagnitude, 0]);
+        for (let i = 1; i < numNodes; i++) {
+            // starting from a vector in the twelve o'clock position
+            // u = | 0 |
+            //     | m |
+            //     | 0 | where m is magnitude
+            // our rotated vector up = A * u, where:
+            // A = | cos(theta) -sin(theta)  0 |
+            //     | sin(theta)  cos(theta)  0 |
+            //     | 0           0           1 |
+            const theta = (Math.PI * 2) / numNodes;
+            const A = [
+                [Math.cos(theta), -Math.sin(theta), 0],
+                [Math.sin(theta), Math.cos(theta), 0],
+                [0, 0, 1]
+            ]
+            const u = nodes[i - 1]
+            const up = [
+                (u[0] * A[0][0] + u[1] * A[0][1] + u[2] * A[0][2]),
+                (u[0] * A[1][0] + u[1] * A[1][1] + u[2] * A[1][2]),
+                (u[0] * A[2][0] + u[1] * A[2][1] + u[2] * A[2][2])
+            ]
+            up[2] = Math.sin(zOffset) * lineMagnitude;
+            zOffset += 1;
+            nodes.push(up)
+        }
+        return nodes;
     }
 
-    // Then we'll call it 3 times with 3 different colors and X positions saving
-    // the Mesh instances in an array.
-    const cubes = [
-        makeInstance(geometry, 0x44aa88, 0),
-        makeInstance(geometry, 0x8844aa, -2),
-        makeInstance(geometry, 0xaa8844, 2),
-    ];
+    const perimeterNodes = createPerimeterNodes();
+
+    /* == LINES =--=============================================================
+     */
+    const lines = [];
+
+    function addObject(obj) {
+        obj.name = `obj${lines.length}`;
+        scene.add(obj);
+        lines.push(obj);
+    }
+
+    function addLineGeometry(fromNode, toNode) {
+        const points = [];
+        points.push(new THREE.Vector3(...fromNode));
+        points.push(new THREE.Vector3(...toNode));
+        const geometry = new THREE.BufferGeometry().setFromPoints(points);
+        const material = new THREE.LineBasicMaterial();
+        material.color.setHSL(hue, saturation, luminance);
+        const mesh = new THREE.Line(geometry, material);
+        addObject(mesh);
+    }
+
+    /* == SCREEN RESIZE ========================================================
+     */
+    // Let's write a function that checks if the renderer's canvas is not
+    // already the size it is being displayed as and if so set its size.
+    function resizeRendererToDisplaySize(renderer) {
+        const canvas = renderer.domElement;
+        // don't use HD-DPI - faster but lower res
+        //const width = canvas.clientWidth;
+        //const height = canvas.clientHeight;
+        // use HD-DPI - slower (especially for mobile) but higher res
+        const pixelRatio = window.devicePixelRatio;
+        const width = canvas.clientWidth * pixelRatio | 0;
+        const height = canvas.clientHeight * pixelRatio | 0;
+
+        const needResize = canvas.width !== width || canvas.height !== height;
+        if (needResize) {
+            // Once we know if we need to resize or not we then call
+            // renderer.setSize and pass in the new width and height. It's
+            // important to pass false at the end. render.setSize by default
+            // sets the canvas's CSS size but doing so is not what we want. We
+            // want the browser to continue to work how it does for all other
+            // elements which is to use CSS to determine the display size of the
+            // element. We don't want canvases used by three to be different
+            // than other elements.
+            renderer.setSize(width, height, false);
+        }
+        // Note that our function returns true if the canvas was resized. We can
+        // use this to check if there are other things we should update.
+        return needResize;
+    }
 
     /* == ANIMATE ==============================================================
      * Let's animate it spinning and hopefully that will make it clear it's
@@ -97,22 +127,37 @@ function main() {
      */
     // To animate it we'll render inside a render loop using
     // requestAnimationFrame. Here's our loop.
+    let currentProduct = 0;
+    let currentMultiplicand = 0;
     function render(time) {
-        time *= 0.001;  // convert time to seconds
+        currentMultiplicand = (currentMultiplicand + 1) % numNodes;
+        currentProduct = (currentMultiplicand * multiplier) % numNodes;
+        addLineGeometry(
+            perimeterNodes[currentMultiplicand],
+            perimeterNodes[currentProduct]
+        )
+        if (lines.length > 2000) {
+            const lineToRemove = scene.getObjectByName(lines[0].name);
+            scene.remove(lineToRemove);
+            lines.shift();
+        }
+        // Since the aspect is only going to change if the canvas's display size
+        // changed we only set the camera's aspect if
+        // resizeRendererToDisplaySize returns true.
+        if (resizeRendererToDisplaySize(renderer)) {
+            // Let's fix distortion of the cubes
+            const canvas = renderer.domElement;
+            camera.aspect = canvas.clientWidth / canvas.clientHeight;
+            camera.updateProjectionMatrix();
+        }
 
-        // Finally we'll spin all 3 cubes in our render function. We compute a
-        // slightly different rotation for each one.
-        cubes.forEach((cube, ndx) => {
-            const speed = 1 + ndx * .1;
-            const rot = time * speed;
-            cube.rotation.x = rot;
-            cube.rotation.y = rot;
+        lines.forEach((obj) => {
+            //obj.rotation.y = Math.sin(time * 0.001) * (1 + Math.sin(0.1)) / 16;
+            //obj.rotation.x = Math.cos(time * 0.001) * (1 + Math.sin(0.1)) / 16;
         });
 
-        /* == RENDER ===========================================================
-         * We can then render the scene by calling the renderer's render
-         * function and passing it the scene and the camera
-         */
+        // We can then render the scene by calling the renderer's render
+        // function and passing it the scene and the camera
         renderer.render(scene, camera);
 
         requestAnimationFrame(render);
@@ -120,7 +165,31 @@ function main() {
     requestAnimationFrame(render);
 }
 
-main();
+{
+    // initial conditions
+    const hue = Math.random();
+    const saturation = 1;
+    const luminance = .5;
+    const lineMagnitude = 32;
+    const numNodes = Math.floor(Math.random() * 2000) + 96;
+    const multiplier = Math.floor(Math.random() * 2000) + 2;
 
-// TODO
-// https://threejsfundamentals.org/threejs/lessons/threejs-responsive.html
+    console.log({
+        hue,
+        saturation,
+        luminance,
+        lineMagnitude,
+        numNodes,
+        multiplier
+    });
+
+    main(
+        hue,
+        saturation,
+        luminance,
+        numNodes,
+        lineMagnitude,
+        multiplier
+    );
+}
+
